@@ -364,10 +364,6 @@ python train.py
 - ✅ Type hints
 - ✅ Documentation đầy đủ
 
-**Files cũ giữ lại để tham khảo:**
-- `Train_Car_Model.py` → `train.py`
-- `Live_Car_Detector_YOLO.py` → `run_detection.py`
-
 ## 🤝 Contributing
 
 Code được chia module rõ ràng. Muốn thêm tính năng:
@@ -379,3 +375,4 @@ Code được chia module rõ ràng. Muốn thêm tính năng:
 ---
 
 **Happy Coding! 🚀**
+
