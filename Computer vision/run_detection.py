@@ -119,7 +119,7 @@ def main():
         return frame
     
     # Process video
-    logger.info("\n🚀 Starting detection...")
+    logger.info("\n Starting detection...")
     logger.info("Press 'q' or 'ESC' to quit\n")
     
     try:
@@ -139,8 +139,9 @@ def main():
         sys.exit(1)
     
     logger.info("=" * 60)
-    print("\n👋 Detection finished")
+    print("\n Detection finished")
 
 
 if __name__ == "__main__":
     main()
+
