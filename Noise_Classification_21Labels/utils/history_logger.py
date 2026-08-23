@@ -10,6 +10,32 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+SNR_TABLE_COLUMNS = [
+    ("mAP", "mAP"),
+    ("macro-AUC", "macro_auc"),
+    ("macro-F1", "macro_f1"),
+    ("micro-F1", "micro_f1"),
+    ("precision", "precision_macro"),
+    ("recall", "recall_macro"),
+    ("acc", "hamming_accuracy"),
+    ("exact", "subset_accuracy"),
+]
+
+
+def format_snr_table(snr_metrics: Dict[str, Dict[str, Any]]) -> str:
+    """Render the per-SNR breakdown as a fixed-width table for logs and reports."""
+    if not snr_metrics:
+        return "(no SNR bands matched any clip)"
+    header = f"  {'band':>10s} {'clips':>7s}" + "".join(
+        f" {title:>10s}" for title, _ in SNR_TABLE_COLUMNS
+    )
+    lines = [header, "  " + "-" * (len(header) - 2)]
+    for name, values in snr_metrics.items():
+        row = f"  {name:>10s} {values['samples']:>7d}"
+        row += "".join(f" {values[key]:>10.4f}" for _, key in SNR_TABLE_COLUMNS)
+        lines.append(row)
+    return "\n".join(lines)
+
 
 class HistoryLogger:
     def __init__(self, log_dir: str, label_names: Sequence[str], threshold: float = 0.5) -> None:
@@ -171,6 +197,49 @@ class HistoryLogger:
             f"{prefix}_windows": statistics["num_windows"],
         }
 
+    def _build_test_report(
+        self,
+        val_statistics: Dict[str, Any],
+        test_statistics: Dict[str, Any],
+    ) -> str:
+        """Bundle the per-label report, headline metrics and SNR breakdown in one file."""
+        sections = [
+            f"Test classification report (threshold={self.threshold:.2f})",
+            "=" * 78,
+            test_statistics["message"].strip("\n"),
+            "",
+            "Overall test metrics",
+            "-" * 78,
+            self._format_overall_metrics(test_statistics),
+            "",
+            "Test metrics by SNR band",
+            "-" * 78,
+            format_snr_table(test_statistics.get("snr_metrics") or {}),
+            "",
+            "Validation metrics by SNR band (best epoch)",
+            "-" * 78,
+            format_snr_table(val_statistics.get("snr_metrics") or {}),
+            "",
+        ]
+        return "\n".join(sections)
+
+    @staticmethod
+    def _format_overall_metrics(statistics: Dict[str, Any]) -> str:
+        rows = [
+            ("subset accuracy (exact match)", statistics["subset_accuracy"]),
+            ("hamming accuracy", statistics["hamming_accuracy"]),
+            ("mAP", statistics["mAP"]),
+            ("macro AUC", statistics["macro_auc"]),
+            ("macro F1", statistics["f1_macro"]),
+            ("micro F1", statistics["f1_micro"]),
+            ("macro precision", statistics["precision_macro"]),
+            ("macro recall", statistics["recall_macro"]),
+        ]
+        lines = [f"  {name:<30s} {value:.4f}" for name, value in rows]
+        lines.append(f"  {'clips':<30s} {statistics['num_clips']:d}")
+        lines.append(f"  {'windows':<30s} {statistics['num_windows']:d}")
+        return "\n".join(lines)
+
     def save_summary(
         self,
         training_time: float,
@@ -204,7 +273,7 @@ class HistoryLogger:
         self.save_snr_metrics("test_snr_metrics.csv", test_statistics)
         self.plot_snr_metrics(test_statistics)
         (self.log_dir / "classification_report_test.txt").write_text(
-            test_statistics["message"], encoding="utf-8"
+            self._build_test_report(val_statistics, test_statistics), encoding="utf-8"
         )
         logger.info("Saved training summary to %s", self.log_dir)
 

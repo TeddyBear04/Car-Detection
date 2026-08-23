@@ -10,7 +10,7 @@
   "cache_audio": false,
   "num_workers": -1,
   "pin_memory": true,
-  "threshold": 0.5,
+  "threshold": 0.7,
   "use_pos_weight": true,
   "max_pos_weight": 20.0,
   "random_seed": 2026,

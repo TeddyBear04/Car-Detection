@@ -17,34 +17,11 @@ from utils import (
     EarlyStopping,
     HistoryLogger,
     InferenceTimer,
-    MultiLabelBCELoss,
+    MultiLabelBCELoss,    format_snr_table,
 )
 from utils.evaluate import compute_multilabel_metrics
 
 logger = logging.getLogger(__name__)
-
-
-def _format_snr_table(snr_metrics: Dict[str, Dict[str, Any]]) -> str:
-    """Render the per-SNR breakdown as a fixed-width table for the log."""
-    if not snr_metrics:
-        return " (no SNR bands matched any clip)"
-    columns = [
-        ("mAP", "mAP"),
-        ("macro-AUC", "macro_auc"),
-        ("macro-F1", "macro_f1"),
-        ("micro-F1", "micro_f1"),
-        ("precision", "precision_macro"),
-        ("recall", "recall_macro"),
-        ("acc", "hamming_accuracy"),
-        ("exact", "subset_accuracy"),
-    ]
-    header = f"\n  {'band':>10s} {'clips':>7s}" + "".join(f" {title:>10s}" for title, _ in columns)
-    lines = [header, "  " + "-" * (len(header) - 3)]
-    for name, values in snr_metrics.items():
-        row = f"  {name:>10s} {values['samples']:>7d}"
-        row += "".join(f" {values[key]:>10.4f}" for _, key in columns)
-        lines.append(row)
-    return "\n".join(lines)
 
 
 class BaseTrainer:
@@ -239,7 +216,15 @@ class AudioTrainer(BaseTrainer):
         )
         self.history.plot_history()
         logger.info("Test report:%s", test_statistics["message"])
-        logger.info("Test metrics by SNR band:%s", _format_snr_table(test_statistics["snr_metrics"]))
+        logger.info(
+            "Test accuracy: subset=%.4f hamming=%.4f | mAP=%.4f macro_f1=%.4f macro_auc=%.4f",
+            test_statistics["subset_accuracy"],
+            test_statistics["hamming_accuracy"],
+            test_statistics["mAP"],
+            test_statistics["f1_macro"],
+            test_statistics["macro_auc"],
+        )
+        logger.info("Test metrics by SNR band:\n%s", format_snr_table(test_statistics["snr_metrics"]))
         return {
             "best_epoch": best_epoch,
             "best_validation": best_val_statistics,
