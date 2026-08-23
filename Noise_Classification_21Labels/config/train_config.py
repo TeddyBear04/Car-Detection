@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -28,6 +28,29 @@ class AudioFeaturesConfig(BaseModel):
         if self.inference_hop_seconds > self.clip_seconds:
             raise ValueError("inference_hop_seconds must be <= clip_seconds")
         return self
+
+
+class SnrBandConfig(BaseModel):
+    """One inclusive SNR interval used to break evaluation down by noise level."""
+
+    name: str
+    min_db: float
+    max_db: float
+
+    @model_validator(mode="after")
+    def validate_band(self) -> "SnrBandConfig":
+        if self.min_db > self.max_db:
+            raise ValueError(f"snr band {self.name!r}: min_db must not exceed max_db")
+        return self
+
+
+# Matches how 21_labels_dataset was generated: target SNR is drawn from three
+# separated clusters, so these three bands cover every clip exactly once.
+DEFAULT_SNR_BANDS = [
+    SnrBandConfig(name="[-5,0]", min_db=-5.0, max_db=0.0),
+    SnrBandConfig(name="[5,10]", min_db=5.0, max_db=10.0),
+    SnrBandConfig(name="[15,20]", min_db=15.0, max_db=20.0),
+]
 
 
 class ModelConfig(BaseModel):
@@ -79,7 +102,9 @@ class TrainConfig(BaseModel):
     batch_size: int = Field(default=32, gt=0)
     learning_rate: float = Field(default=1e-3, gt=0.0)
     weight_decay: float = Field(default=1e-4, ge=0.0)
-    monitor: Literal["macro_f1", "mAP", "loss"] = "macro_f1"
+    monitor: Literal[
+        "macro_f1", "mAP", "hamming_accuracy", "subset_accuracy", "loss"
+    ] = "macro_f1"
     early_stopping: bool = True
     patience: int = Field(default=15, gt=0)
     delta: float = Field(default=0.0, ge=0.0)
@@ -92,6 +117,7 @@ class TrainConfig(BaseModel):
     random_seed: int = Field(default=2026, ge=0)
     ckpt_dir: str = "checkpoint"
     profile_model: bool = False
+    snr_bands: List[SnrBandConfig] = Field(default_factory=lambda: list(DEFAULT_SNR_BANDS))
     model: ModelConfig = Field(default_factory=ModelConfig)
     dataset_splitter: SplitterConfig = Field(default_factory=SplitterConfig)
     audio_features: AudioFeaturesConfig = Field(default_factory=AudioFeaturesConfig)

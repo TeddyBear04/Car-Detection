@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections import OrderedDict
 from typing import Any, Dict, List, Sequence
 
@@ -17,6 +18,8 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 from tqdm import tqdm
+
+logger = logging.getLogger(__name__)
 
 
 def _per_class_average_precision(target: np.ndarray, probability: np.ndarray) -> np.ndarray:
@@ -63,6 +66,9 @@ def compute_multilabel_metrics(
     precision_weighted, recall_weighted, f1_weighted, _ = precision_recall_fscore_support(
         target, prediction, average="weighted", zero_division=0
     )
+    # Element-wise correctness per label. Its mean over labels equals
+    # hamming_accuracy, so it is kept only for the per-label report.
+    per_label_accuracy = (target == prediction).mean(axis=0).astype(np.float64)
     report = ""
     if include_report:
         report = classification_report(
@@ -80,6 +86,7 @@ def compute_multilabel_metrics(
         "subset_accuracy": float(accuracy_score(target, prediction)),
         "accuracy": float(accuracy_score(target, prediction)),
         "hamming_accuracy": float(1.0 - hamming_loss(target, prediction)),
+        "per_label_accuracy": per_label_accuracy,
         "precision_macro": float(precision_macro),
         "recall_macro": float(recall_macro),
         "f1_macro": float(f1_macro),
@@ -134,6 +141,65 @@ def aggregate_windows(
     )
 
 
+# (name, min_db, max_db), both bounds inclusive. Mirrors how 21_labels_dataset
+# draws target SNR, so the three bands cover every clip exactly once.
+DEFAULT_SNR_BANDS: tuple[tuple[str, float, float], ...] = (
+    ("[-5,0]", -5.0, 0.0),
+    ("[5,10]", 5.0, 10.0),
+    ("[15,20]", 15.0, 20.0),
+)
+
+
+def compute_snr_band_metrics(
+    clip_target: np.ndarray,
+    clip_probability: np.ndarray,
+    clip_snr: np.ndarray,
+    threshold: float,
+    label_names: Sequence[str],
+    snr_bands: Sequence[tuple[str, float, float]] = DEFAULT_SNR_BANDS,
+) -> Dict[str, Dict[str, Any]]:
+    """Break the clip-level metrics down by target SNR band."""
+    band_metrics: Dict[str, Dict[str, Any]] = {}
+    covered = np.zeros(len(clip_snr), dtype=bool)
+    for name, min_db, max_db in snr_bands:
+        mask = (clip_snr >= min_db) & (clip_snr <= max_db)
+        covered |= mask
+        if not mask.any():
+            logger.warning("SNR band %s matched no clips; skipping it", name)
+            continue
+        metrics = compute_multilabel_metrics(
+            clip_target[mask],
+            clip_probability[mask],
+            threshold,
+            label_names,
+            include_report=False,
+        )
+        band_metrics[name] = {
+            "samples": int(mask.sum()),
+            "snr_min_db": float(min_db),
+            "snr_max_db": float(max_db),
+            "mAP": metrics["mAP"],
+            "macro_auc": metrics["macro_auc"],
+            "macro_f1": metrics["f1_macro"],
+            "micro_f1": metrics["f1_micro"],
+            "precision_macro": metrics["precision_macro"],
+            "recall_macro": metrics["recall_macro"],
+            "hamming_accuracy": metrics["hamming_accuracy"],
+            "subset_accuracy": metrics["subset_accuracy"],
+        }
+
+    uncovered = int((~covered).sum())
+    if uncovered:
+        logger.warning(
+            "%d of %d clips (%.1f%%) fall outside every SNR band and are excluded "
+            "from the per-SNR report; check snr_bands in train_config.json",
+            uncovered,
+            len(clip_snr),
+            100.0 * uncovered / max(len(clip_snr), 1),
+        )
+    return band_metrics
+
+
 class BaseEvaluator:
     def __init__(self, model: nn.Module) -> None:
         self.model = model
@@ -151,12 +217,14 @@ class AudioEvaluator(BaseEvaluator):
         threshold: float = 0.5,
         loss_fn: nn.Module | None = None,
         window_reduction: str = "mean",
+        snr_bands: Sequence[tuple[str, float, float]] | None = None,
     ) -> None:
         super().__init__(model)
         self.label_names = list(label_names)
         self.threshold = threshold
         self.loss_fn = loss_fn
         self.window_reduction = window_reduction
+        self.snr_bands = tuple(snr_bands) if snr_bands else DEFAULT_SNR_BANDS
 
     def evaluate(self, data_loader: Any) -> Dict[str, Any]:
         sample_ids: List[str] = []
@@ -204,26 +272,12 @@ class AudioEvaluator(BaseEvaluator):
         statistics["num_clips"] = len(clip_ids)
         statistics["num_windows"] = len(sample_ids)
 
-        snr_bands = {
-            "[-5,0]": (clip_snr >= -5.0) & (clip_snr <= 0.0),
-            "[5,10]": (clip_snr >= 5.0) & (clip_snr <= 10.0),
-            "[15,20]": (clip_snr >= 15.0) & (clip_snr <= 20.0),
-        }
-        statistics["snr_metrics"] = {}
-        for name, mask in snr_bands.items():
-            if not mask.any():
-                continue
-            band_metrics = compute_multilabel_metrics(
-                clip_target[mask],
-                clip_probability[mask],
-                self.threshold,
-                self.label_names,
-                include_report=False,
-            )
-            statistics["snr_metrics"][name] = {
-                "samples": int(mask.sum()),
-                "mAP": band_metrics["mAP"],
-                "macro_f1": band_metrics["f1_macro"],
-                "micro_f1": band_metrics["f1_micro"],
-            }
+        statistics["snr_metrics"] = compute_snr_band_metrics(
+            clip_target,
+            clip_probability,
+            clip_snr,
+            self.threshold,
+            self.label_names,
+            self.snr_bands,
+        )
         return statistics

@@ -16,6 +16,11 @@
   "random_seed": 2026,
   "ckpt_dir": "checkpoint",
   "profile_model": false,
+  "snr_bands": [
+    { "name": "[-5,0]", "min_db": -5.0, "max_db": 0.0 },
+    { "name": "[5,10]", "min_db": 5.0, "max_db": 10.0 },
+    { "name": "[15,20]", "min_db": 15.0, "max_db": 20.0 }
+  ],
   "model": {
     "backbone": "Cnn14MobileV2",
     "pretrained": false,

@@ -24,6 +24,29 @@ from utils.evaluate import compute_multilabel_metrics
 logger = logging.getLogger(__name__)
 
 
+def _format_snr_table(snr_metrics: Dict[str, Dict[str, Any]]) -> str:
+    """Render the per-SNR breakdown as a fixed-width table for the log."""
+    if not snr_metrics:
+        return " (no SNR bands matched any clip)"
+    columns = [
+        ("mAP", "mAP"),
+        ("macro-AUC", "macro_auc"),
+        ("macro-F1", "macro_f1"),
+        ("micro-F1", "micro_f1"),
+        ("precision", "precision_macro"),
+        ("recall", "recall_macro"),
+        ("acc", "hamming_accuracy"),
+        ("exact", "subset_accuracy"),
+    ]
+    header = f"\n  {'band':>10s} {'clips':>7s}" + "".join(f" {title:>10s}" for title, _ in columns)
+    lines = [header, "  " + "-" * (len(header) - 3)]
+    for name, values in snr_metrics.items():
+        row = f"  {name:>10s} {values['samples']:>7d}"
+        row += "".join(f" {values[key]:>10.4f}" for _, key in columns)
+        lines.append(row)
+    return "\n".join(lines)
+
+
 class BaseTrainer:
     def train(self, train_loader: Any, val_loader: Any, test_loader: Any, max_epoch: int) -> Dict[str, Any]:
         raise NotImplementedError
@@ -45,6 +68,7 @@ class AudioTrainer(BaseTrainer):
         pos_weight: torch.Tensor | None = None,
         clip_samples: int = 64_000,
         train_config_path: str = "config/train_config.json",
+        snr_bands: Sequence[tuple[str, float, float]] | None = None,
     ) -> None:
         self.model = model
         self.optimizer = optimizer
@@ -62,6 +86,7 @@ class AudioTrainer(BaseTrainer):
             threshold=threshold,
             loss_fn=self.loss_fn,
             window_reduction="mean",
+            snr_bands=snr_bands,
         )
         self.early_stopper = (
             EarlyStopping(patience=patience, delta=delta, verbose=True) if early_stopping else None
@@ -79,6 +104,10 @@ class AudioTrainer(BaseTrainer):
             return float(statistics["f1_macro"])
         if self.monitor == "mAP":
             return float(statistics["mAP"])
+        if self.monitor == "hamming_accuracy":
+            return float(statistics["hamming_accuracy"])
+        if self.monitor == "subset_accuracy":
+            return float(statistics["subset_accuracy"])
         if self.monitor == "loss":
             return -float(statistics["loss"])
         raise ValueError(f"Unsupported monitor: {self.monitor}")
@@ -167,16 +196,20 @@ class AudioTrainer(BaseTrainer):
                 is_best=is_best,
             )
             logger.info(
-                "Epoch %d | train loss %.4f mAP %.4f macro-F1 %.4f | "
-                "val loss %.4f mAP %.4f macro-F1 %.4f micro-F1 %.4f",
+                "Epoch %d | train loss %.4f mAP %.4f macro-F1 %.4f acc %.4f | "
+                "val loss %.4f mAP %.4f macro-F1 %.4f micro-F1 %.4f "
+                "acc %.4f exact-match %.4f",
                 epoch,
                 train_loss,
                 train_statistics["mAP"],
                 train_statistics["f1_macro"],
+                train_statistics["hamming_accuracy"],
                 val_statistics["loss"],
                 val_statistics["mAP"],
                 val_statistics["f1_macro"],
                 val_statistics["f1_micro"],
+                val_statistics["hamming_accuracy"],
+                val_statistics["subset_accuracy"],
             )
             if self.early_stopper is not None and self.early_stopper.step(score):
                 break
@@ -206,7 +239,7 @@ class AudioTrainer(BaseTrainer):
         )
         self.history.plot_history()
         logger.info("Test report:%s", test_statistics["message"])
-        logger.info("Test metrics by SNR band: %s", test_statistics["snr_metrics"])
+        logger.info("Test metrics by SNR band:%s", _format_snr_table(test_statistics["snr_metrics"]))
         return {
             "best_epoch": best_epoch,
             "best_validation": best_val_statistics,

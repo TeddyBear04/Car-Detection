@@ -154,6 +154,7 @@ def run_training(config_path: str, device_name: Optional[str] = None) -> dict:
         pos_weight=pos_weight,
         clip_samples=clip_samples,
         train_config_path=config_path,
+        snr_bands=[(band.name, band.min_db, band.max_db) for band in config.snr_bands],
     )
     return trainer.train(train_loader, val_loader, test_loader, config.epochs)
 

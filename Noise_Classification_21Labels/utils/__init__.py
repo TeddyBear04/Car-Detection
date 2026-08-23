@@ -1,5 +1,10 @@
 from .losses import ClipBCELoss, ClipCELoss, MultiLabelBCELoss
-from .evaluate import BaseEvaluator, AudioEvaluator
+from .evaluate import (
+    BaseEvaluator,
+    AudioEvaluator,
+    DEFAULT_SNR_BANDS,
+    compute_snr_band_metrics,
+)
 from .early_stopping import EarlyStopping
 from .history_logger import HistoryLogger
 from .inference_timer import InferenceTimer
@@ -11,6 +16,8 @@ __all__ = [
     "MultiLabelBCELoss",
     "BaseEvaluator",
     "AudioEvaluator",
+    "DEFAULT_SNR_BANDS",
+    "compute_snr_band_metrics",
     "EarlyStopping",
     "HistoryLogger",
     "InferenceTimer",
