@@ -44,30 +44,37 @@ class SnrBandConfig(BaseModel):
         return self
 
 
-# Matches how 21_labels_dataset was generated: target SNR is drawn from three
-# separated clusters, so these three bands cover every clip exactly once.
+# The 36-label dataset draws target SNR from {-5, 0, 5, 10, 15, 20} dB, so these
+# six one-value bands cover every clip exactly once and keep each level separate.
 DEFAULT_SNR_BANDS = [
-    SnrBandConfig(name="[-5,0]", min_db=-5.0, max_db=0.0),
-    SnrBandConfig(name="[5,10]", min_db=5.0, max_db=10.0),
-    SnrBandConfig(name="[15,20]", min_db=15.0, max_db=20.0),
+    SnrBandConfig(name="-5dB", min_db=-5.0, max_db=-5.0),
+    SnrBandConfig(name="0dB", min_db=0.0, max_db=0.0),
+    SnrBandConfig(name="5dB", min_db=5.0, max_db=5.0),
+    SnrBandConfig(name="10dB", min_db=10.0, max_db=10.0),
+    SnrBandConfig(name="15dB", min_db=15.0, max_db=15.0),
+    SnrBandConfig(name="20dB", min_db=20.0, max_db=20.0),
 ]
 
 
 class ModelConfig(BaseModel):
     backbone: str = "Cnn14MobileV2"
     pretrained: bool = False
-    classes_num: int = Field(default=21, gt=0)
+    classes_num: int = Field(default=36, gt=0)
 
 
 class SplitterConfig(BaseModel):
     """Dataset settings; the supplied train/validation/test manifests are authoritative."""
 
-    dataset_path: str = "/marimo/21_labels_dataset"
-    signal_type: Literal["mixture", "clean", "oracle_noise"] = "mixture"
-    train_directory: str = "train_single"
-    validation_directory: str = "validation_single"
-    test_directory: str = "test_single"
-    selected_labels_file: str = "selected_labels.csv"
+    dataset_path: str = "/marimo/36_labels"
+    signal_type: Literal["mixture", "clean", "noise", "oracle_noise"] = "mixture"
+    train_directory: str = "train"
+    validation_directory: str = "validation"
+    test_directory: str = "test"
+    # Sub-directories holding the two stems used by dynamic-SNR augmentation.
+    clean_directory: str = "clean"
+    noise_directory: str = "noise"
+    # labels.txt (one name per line) or the older selected_labels.csv catalog.
+    selected_labels_file: str = "labels.txt"
     use_predefined_splits: bool = True
     include_video: bool = False
     save_results: bool = False
@@ -91,7 +98,7 @@ class SplitterConfig(BaseModel):
     @model_validator(mode="after")
     def validate_dataset_settings(self) -> "SplitterConfig":
         if not self.use_predefined_splits:
-            raise ValueError("21_labels_dataset must use its predefined manifest splits")
+            raise ValueError("the dataset must use its predefined manifest splits")
         if self.dynamic_snr_min_db >= self.dynamic_snr_max_db:
             raise ValueError("dynamic_snr_min_db must be smaller than dynamic_snr_max_db")
         return self
@@ -115,7 +122,9 @@ class TrainConfig(BaseModel):
     use_pos_weight: bool = True
     max_pos_weight: float = Field(default=20.0, ge=1.0)
     random_seed: int = Field(default=2026, ge=0)
-    ckpt_dir: str = "checkpoint"
+    # Runs on the 36-label dataset write here. The 21-label results in
+    # "checkpoint" are kept as-is and are never overwritten.
+    ckpt_dir: str = "checkpoint_36_labels"
     profile_model: bool = False
     snr_bands: List[SnrBandConfig] = Field(default_factory=lambda: list(DEFAULT_SNR_BANDS))
     model: ModelConfig = Field(default_factory=ModelConfig)

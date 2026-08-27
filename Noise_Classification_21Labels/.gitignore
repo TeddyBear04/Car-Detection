@@ -3,6 +3,7 @@ raw_dataset/
 .venv/
 U-FFIA/
 checkpoint/
+checkpoint_36_labels/
 outputs/
 *.noise_predictions.csv
 *.noise_predictions.summary.json

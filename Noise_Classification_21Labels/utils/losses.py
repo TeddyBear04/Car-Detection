@@ -9,7 +9,7 @@ class BaseLoss(nn.Module):
 
 
 class MultiLabelBCELoss(BaseLoss):
-    """Numerically stable BCE applied independently to the 21 raw logits."""
+    """Numerically stable BCE applied independently to each raw logit."""
 
     def __init__(self, pos_weight: torch.Tensor | None = None) -> None:
         super().__init__()

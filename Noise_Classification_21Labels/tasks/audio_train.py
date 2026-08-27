@@ -24,6 +24,30 @@ from utils.evaluate import compute_multilabel_metrics
 logger = logging.getLogger(__name__)
 
 
+def _guard_existing_results(ckpt_dir: Path, label_names: Sequence[str]) -> None:
+    """Refuse to write over results produced for a different label set.
+
+    A 21-label run and a 36-label run share the same file names but their
+    checkpoints are not interchangeable, so silently mixing them would destroy
+    the earlier reports and leave an unloadable audio_best.pt behind.
+    """
+    labels_path = ckpt_dir / "labels.json"
+    if not labels_path.is_file():
+        return
+    try:
+        existing = json.loads(labels_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return
+    if list(existing) == list(label_names):
+        return
+    raise FileExistsError(
+        f"{ckpt_dir} already holds results for {len(existing)} labels "
+        f"({', '.join(map(str, existing[:3]))}...), but this run has "
+        f"{len(label_names)} labels. Point ckpt_dir at a different directory, or "
+        f"move/delete {ckpt_dir} first."
+    )
+
+
 class BaseTrainer:
     def train(self, train_loader: Any, val_loader: Any, test_loader: Any, max_epoch: int) -> Dict[str, Any]:
         raise NotImplementedError
@@ -51,6 +75,7 @@ class AudioTrainer(BaseTrainer):
         self.optimizer = optimizer
         self.device = device
         self.ckpt_dir = Path(ckpt_dir)
+        _guard_existing_results(self.ckpt_dir, label_names)
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
         self.label_names = list(label_names)
         self.threshold = threshold

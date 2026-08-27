@@ -24,7 +24,14 @@ class PredefinedManifestSplitter:
             self.config.validation_directory,
         )
         return tuple(
-            read_manifest(self.root, directory, self.config.signal_type, self.labels)
+            read_manifest(
+                self.root,
+                directory,
+                self.config.signal_type,
+                self.labels,
+                clean_directory=self.config.clean_directory,
+                noise_directory=self.config.noise_directory,
+            )
             for directory in directories
         )
 

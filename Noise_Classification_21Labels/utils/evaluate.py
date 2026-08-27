@@ -141,12 +141,15 @@ def aggregate_windows(
     )
 
 
-# (name, min_db, max_db), both bounds inclusive. Mirrors how 21_labels_dataset
-# draws target SNR, so the three bands cover every clip exactly once.
+# (name, min_db, max_db), both bounds inclusive. Mirrors the discrete target SNRs
+# of the 36-label dataset, so the six bands cover every clip exactly once.
 DEFAULT_SNR_BANDS: tuple[tuple[str, float, float], ...] = (
-    ("[-5,0]", -5.0, 0.0),
-    ("[5,10]", 5.0, 10.0),
-    ("[15,20]", 15.0, 20.0),
+    ("-5dB", -5.0, -5.0),
+    ("0dB", 0.0, 0.0),
+    ("5dB", 5.0, 5.0),
+    ("10dB", 10.0, 10.0),
+    ("15dB", 15.0, 15.0),
+    ("20dB", 20.0, 20.0),
 )
 
 

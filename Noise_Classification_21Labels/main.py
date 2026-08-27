@@ -160,7 +160,7 @@ def run_training(config_path: str, device_name: Optional[str] = None) -> dict:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train the 21-label noise classifier")
+    parser = argparse.ArgumentParser(description="Train the noise classifier")
     parser.add_argument(
         "--config",
         default=str(PROJECT_ROOT / "config" / "train_config.json"),

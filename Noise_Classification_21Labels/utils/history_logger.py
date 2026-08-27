@@ -304,7 +304,7 @@ class HistoryLogger:
             axis.set_xlabel("Epoch")
             axis.grid(alpha=0.3)
             axis.legend()
-        figure.suptitle("21-label noise classification")
+        figure.suptitle(f"{len(self.label_names)}-label noise classification")
         figure.tight_layout()
         figure.savefig(self.log_dir / "learning_curves.png", dpi=150)
         plt.close(figure)

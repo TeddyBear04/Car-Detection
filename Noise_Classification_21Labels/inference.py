@@ -20,6 +20,30 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+def _check_checkpoint_classes(
+    checkpoint_path: Path,
+    checkpoint: dict,
+    state_dict: dict,
+    classes_num: int,
+) -> None:
+    """Turn a head-size mismatch into an actionable message.
+
+    The 21-label checkpoints under `checkpoint/` cannot be loaded into a
+    36-label model; without this the failure is a raw state_dict size error.
+    """
+    label_names = checkpoint.get("label_names")
+    checkpoint_classes = len(label_names) if label_names else None
+    if checkpoint_classes is None:
+        weight = state_dict.get("backbone.fc_audioset.weight")
+        checkpoint_classes = int(weight.shape[0]) if weight is not None else None
+    if checkpoint_classes is not None and checkpoint_classes != classes_num:
+        raise ValueError(
+            f"{checkpoint_path} was trained for {checkpoint_classes} labels, but the "
+            f"config asks for {classes_num}. Use a checkpoint from a matching run, or "
+            f"set model.classes_num (and the dataset) to match this checkpoint."
+        )
+
+
 def load_model(
     config: TrainConfig,
     checkpoint_path: Path,
@@ -28,6 +52,7 @@ def load_model(
     model = AudioModel(AudioFrontend(config.audio_features), build_backbone(config.model)).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     state_dict = checkpoint.get("model_state_dict", checkpoint)
+    _check_checkpoint_classes(checkpoint_path, checkpoint, state_dict, config.model.classes_num)
     model.load_state_dict(state_dict, strict=True)
     label_names = checkpoint.get("label_names")
     if label_names is None:
@@ -129,7 +154,7 @@ def predict_audio(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Sliding-window inference for the 21-label model")
+    parser = argparse.ArgumentParser(description="Sliding-window inference for the noise classifier")
     parser.add_argument("audio_path")
     parser.add_argument("--config", default=str(PROJECT_ROOT / "config" / "train_config.json"))
     parser.add_argument("--checkpoint", default=None)

@@ -1,4 +1,11 @@
-"""Manifest-based loader for the 21-label speech-plus-noise dataset."""
+"""Manifest-based loader for the speech-plus-noise datasets.
+
+Two on-disk layouts are understood:
+
+* ``labels.txt`` plus a ``multi_hot_<N>`` manifest column (the 36-label dataset).
+* ``selected_labels.csv`` plus a ``label_indices`` manifest column (the older
+  21-label dataset).
+"""
 
 from __future__ import annotations
 
@@ -43,11 +50,18 @@ class ManifestRecord:
     duration_seconds: float
 
 
-def read_label_catalog(dataset_root: Path, filename: str = "selected_labels.csv") -> List[LabelInfo]:
-    path = dataset_root / filename
-    if not path.is_file():
-        raise FileNotFoundError(f"Selected-label catalog not found: {path}")
+def _read_label_catalog_txt(path: Path) -> List[LabelInfo]:
+    """One display name per line; line order defines both indices."""
+    names = [line.strip() for line in path.read_text(encoding="utf-8-sig").splitlines()]
+    names = [name for name in names if name]
+    return [
+        LabelInfo(model_index=index, original_index=index, mid="", display_name=name)
+        for index, name in enumerate(names)
+    ]
 
+
+def _read_label_catalog_csv(path: Path) -> List[LabelInfo]:
+    """model_index/original_index/mid/display_name, as used by 21_labels_dataset."""
     labels: List[LabelInfo] = []
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
@@ -59,6 +73,18 @@ def read_label_catalog(dataset_root: Path, filename: str = "selected_labels.csv"
                     display_name=row["display_name"],
                 )
             )
+    return labels
+
+
+def read_label_catalog(dataset_root: Path, filename: str = "labels.txt") -> List[LabelInfo]:
+    path = dataset_root / filename
+    if not path.is_file():
+        raise FileNotFoundError(f"Label catalog not found: {path}")
+
+    reader = _read_label_catalog_csv if path.suffix.lower() == ".csv" else _read_label_catalog_txt
+    labels = reader(path)
+    if not labels:
+        raise ValueError(f"Label catalog is empty: {path}")
     labels.sort(key=lambda item: item.model_index)
     expected = list(range(len(labels)))
     actual = [item.model_index for item in labels]
@@ -67,14 +93,40 @@ def read_label_catalog(dataset_root: Path, filename: str = "selected_labels.csv"
     return labels
 
 
-def _parse_original_label_indices(raw_value: str) -> List[int]:
+def _parse_json_list(column: str, raw_value: str) -> List[int]:
     try:
         values = json.loads(raw_value)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid label_indices value: {raw_value!r}") from exc
+        raise ValueError(f"Invalid {column} value: {raw_value!r}") from exc
     if not isinstance(values, list):
-        raise ValueError(f"label_indices must be a JSON list, got: {raw_value!r}")
+        raise ValueError(f"{column} must be a JSON list, got: {raw_value!r}")
     return [int(value) for value in values]
+
+
+def _resolve_label_column(fieldnames: Sequence[str], manifest_path: Path) -> Tuple[str, str]:
+    """Return (column, kind) for the column that carries a row's labels.
+
+    kind ``indices``: a JSON list of original label indices.
+    kind ``multi_hot``: a JSON list of 0/1 flags, one per original label.
+    """
+    if "label_indices" in fieldnames:
+        return "label_indices", "indices"
+    multi_hot = [name for name in fieldnames if name == "multi_hot" or name.startswith("multi_hot_")]
+    if len(multi_hot) == 1:
+        return multi_hot[0], "multi_hot"
+    if len(multi_hot) > 1:
+        raise ValueError(f"{manifest_path} has several multi-hot columns: {sorted(multi_hot)}")
+    raise ValueError(
+        f"{manifest_path} has no label column; expected 'label_indices' or 'multi_hot_<N>', "
+        f"got: {sorted(fieldnames)}"
+    )
+
+
+def _row_original_indices(row: Dict[str, str], column: str, kind: str) -> List[int]:
+    values = _parse_json_list(column, row[column])
+    if kind == "indices":
+        return values
+    return [index for index, flag in enumerate(values) if flag]
 
 
 def read_manifest(
@@ -82,11 +134,13 @@ def read_manifest(
     split_directory: str,
     signal_type: str,
     labels: Sequence[LabelInfo],
+    clean_directory: str = "clean",
+    noise_directory: str = "noise",
 ) -> List[ManifestRecord]:
     manifest_path = dataset_root / split_directory / "manifest.csv"
     signal_dir = dataset_root / split_directory / signal_type
-    clean_dir = dataset_root / split_directory / "clean"
-    noise_dir = dataset_root / split_directory / "oracle_noise"
+    clean_dir = dataset_root / split_directory / clean_directory
+    noise_dir = dataset_root / split_directory / noise_directory
     if not manifest_path.is_file():
         raise FileNotFoundError(f"Manifest not found: {manifest_path}")
     if not signal_dir.is_dir():
@@ -95,10 +149,12 @@ def read_manifest(
     original_to_model = {item.original_index: item.model_index for item in labels}
     records: List[ManifestRecord] = []
     with manifest_path.open("r", encoding="utf-8-sig", newline="") as handle:
-        for row_number, row in enumerate(csv.DictReader(handle), start=2):
+        reader = csv.DictReader(handle)
+        label_column, label_kind = _resolve_label_column(reader.fieldnames or [], manifest_path)
+        for row_number, row in enumerate(reader, start=2):
             sample_id = row["sample_id"]
             target = [0.0] * len(labels)
-            for original_index in _parse_original_label_indices(row["label_indices"]):
+            for original_index in _row_original_indices(row, label_column, label_kind):
                 if original_index not in original_to_model:
                     raise ValueError(
                         f"Unknown original label index {original_index} in {manifest_path}:{row_number}"
@@ -216,6 +272,8 @@ class NoiseManifestDataset(Dataset):
             split_directory=split_directory,
             signal_type=dataset_config.signal_type,
             labels=self.labels,
+            clean_directory=dataset_config.clean_directory,
+            noise_directory=dataset_config.noise_directory,
         )
 
         self.index: List[Tuple[int, int]] = []
@@ -309,7 +367,7 @@ class NoiseDataLoaderManager:
         cache_audio: bool = False,
         pin_memory: bool = True,
         seed: int = 2026,
-        classes_num: int = 21,
+        classes_num: int = 36,
     ) -> None:
         self.dataset_config = dataset_config
         self.audio_config = audio_config
@@ -325,7 +383,8 @@ class NoiseDataLoaderManager:
         )
         if len(self.labels) != classes_num:
             raise ValueError(
-                f"Model expects {classes_num} classes, but selected_labels.csv defines {len(self.labels)}"
+                f"Model expects {classes_num} classes, but "
+                f"{dataset_config.selected_labels_file} defines {len(self.labels)}"
             )
         self.datasets = {
             split: NoiseManifestDataset(
